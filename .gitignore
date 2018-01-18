@@ -1,0 +1,12 @@
+.DS_Store
+tags
+.idea/
+env/
+env3/
+dist/
+docs/_build/
+__pycache__/
+*.pyc
+*.swp
+*.swo
+*.egg-info
