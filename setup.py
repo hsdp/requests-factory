@@ -11,6 +11,8 @@ setup(
     name='requests_factory',
     version=__version__,
     description='HTTP Request Builder based on requests Library',
+    long_description=open('README.md').read(),
+    license=open('LICENSE').read(),
     author='Adam Jaso',
     author_email='ajaso@hsdp.io',
     packages=['requests_factory'],
