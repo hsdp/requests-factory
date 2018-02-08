@@ -1,6 +1,10 @@
+import json
+import responses
+import requests
 from unittest import TestCase
 from requests_factory import MIME_JSON, MIME_FORM
 from requests_factory import RequestMixin, Request, Response, RequestFactory
+from requests_factory import ResponseException
 
 
 class CustomRequest(Request):
@@ -11,7 +15,7 @@ class CustomResponse(Response):
     pass
 
 
-def my_callback(req, req_args, args1, arg2=None):
+def my_callback(req, req_args, *args, **kwargs):
         pass
 
 
@@ -195,3 +199,75 @@ class TestRequest(TestCase):
             'headers': {'authorization': 'Basic YWJjOjEyMw=='},
             'verify': False,
             'data': {}})
+
+    @responses.activate
+    def test_send(self):
+        responses.add(responses.GET, 'http://localhost/abc', status=200)
+        res = self.req.send()
+        self.assertIsInstance(res, CustomResponse)
+
+
+class TestResponse(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.fact = RequestFactory()\
+                .set_base_url('http://localhost/')\
+                .set_verify_ssl(False)\
+                .set_response_class(CustomResponse)\
+                .set_request_class(CustomRequest)\
+                .set_basic_auth('abc', '123')\
+                .set_custom_requests_args(allow_redirects=False)\
+                .set_callback(my_callback, 'abc', arg2=123)
+
+    @responses.activate
+    def get_response(self, status_code, **kwargs):
+        responses.add(responses.GET, 'http://localhost/abc',
+                      status=status_code, **kwargs)
+        self.req = self.fact.request('abc')
+        return self.req.send()
+
+    def test_raise_for_status(self):
+        res = self.get_response(400)
+        with self.assertRaises(ResponseException):
+            res.raise_for_status()
+
+    def test_has_error(self):
+        res = self.get_response(400)
+        self.assertTrue(res.has_error)
+
+    def test_is_not_found(self):
+        res = self.get_response(404)
+        self.assertTrue(res.is_not_found)
+
+    def test_is_json(self):
+        res = self.get_response(200, headers={'content-type': MIME_JSON})
+        self.assertTrue(res.is_json)
+
+    def test_headers(self):
+        ex = {'x-abc': '123'}
+        res = self.get_response(200, headers=ex)
+        for n, v in ex.items():
+            self.assertIn(n, ex)
+            self.assertEqual(ex[n], v)
+
+    def test_data(self):
+        ex = json.dumps({'foo': 'bar'})
+        res = self.get_response(200, headers={'content-type': MIME_JSON}, body=ex)
+        self.assertDictEqual(res.data, json.loads(ex))
+        res = self.get_response(400, headers={'content-type': MIME_JSON}, body='')
+        with self.assertRaises(ResponseException):
+            res.data
+
+    def test_response(self):
+        res = self.get_response(200)
+        self.assertIsInstance(res.response, requests.Response)
+
+    def test_text(self):
+        res = self.get_response(200, body='foo')
+        self.assertEqual(res.text.decode('utf-8'), 'foo')
+
+    def test_raw_data(self):
+        ex = json.dumps({'foo': 'bar'})
+        res = self.get_response(400, headers={'content-type': MIME_JSON}, body=ex)
+        self.assertDictEqual(res.raw_data, json.loads(ex))
+
