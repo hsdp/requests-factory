@@ -17,10 +17,14 @@ except ImportError:
 
 try:
     from requests.packages.urllib3.exceptions import InsecureRequestWarning
-except:
+except ImportError:
     from urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+
+MIME_FORM = 'application/x-www-form-urlencoded'
+MIME_JSON = 'application/json'
 
 
 def _print_deprecated_message(from_name, to_name):
@@ -55,8 +59,7 @@ class RequestMixin(object):
         Returns:
             RequestMixin
         """
-        return self.set_header('Content-Type',
-                               'application/x-www-form-urlencoded')
+        return self.set_header('Content-Type', MIME_FORM)
 
     def application_json(self):
         """Sets the Content-Type to application/json
@@ -64,7 +67,7 @@ class RequestMixin(object):
         Returns:
             RequestMixin
         """
-        return self.set_header('Content-Type', 'application/json')
+        return self.set_header('Content-Type', MIME_JSON)
 
     def accept_json(self):
         """Sets the Accepted response type to application/json
@@ -72,7 +75,7 @@ class RequestMixin(object):
         Returns:
             RequestMixin
         """
-        return self.set_header('Accept', 'application/json')
+        return self.set_header('Accept', MIME_JSON)
 
     def set_custom_requests_args(self, **kwargs):
         for k, v in kwargs.items():
