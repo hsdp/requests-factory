@@ -1,12 +1,12 @@
-from __future__ import print_function
 import os
 import re
 import json
 import ssl
-import gevent
 import requests
 import websocket
-import threading
+import logging
+import traceback
+from websocket import WebSocketConnectionClosedException
 from base64 import b64encode
 from requests_toolbelt.multipart import decoder as multipart_decoder
 
@@ -27,9 +27,24 @@ MIME_FORM = 'application/x-www-form-urlencoded'
 MIME_JSON = 'application/json'
 
 
+def _get_logger(logger=None):
+    if logger is None:
+        logger = __name__
+    log = logging.getLogger(logger)
+    if not log.handlers:
+        log.propagate = False
+        formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s')
+        handler = logging.StreamHandler()
+        handler.setFormatter(formatter)
+        log.addHandler(handler)
+        log.setLevel(logging.DEBUG)
+    return log
+
+
 def _print_deprecated_message(from_name, to_name):
-    print('{0} is deprecated. Please migrate to {1}'
-          .format(from_name, to_name))
+    _get_logger().debug('{0} is deprecated. Please migrate to {1}'
+                        .format(from_name, to_name))
 
 
 def _get_default_var(val, env):
@@ -468,12 +483,12 @@ class Request(RequestMixin):
 class WebSocket(object):
     """Simple wrapper class for executing and monitoring WebSocket requests
     """
-    def __init__(self, url, verify_ssl=True, **headers):
-        self._end_watch = threading.Event()
+    def __init__(self, url, verify_ssl=True, logger=None, **headers):
         self.ws = None
         self.url = url
         self.verify_ssl = verify_ssl
         self.headers = []
+        self.log = _get_logger(logger)
         for name, value in headers.items():
             self.set_header(name, value)
 
@@ -502,46 +517,52 @@ class WebSocket(object):
         self.headers.append(': '.join([name, value]))
         return self
 
+    def _init_websocket(self):
+        ws_kwargs = {}
+        if not self.verify_ssl:
+            ws_kwargs.update(sslopt=dict(cert_reqs=ssl.CERT_NONE))
+        self.ws = websocket.WebSocket(**ws_kwargs)
+
+    def _connect_websocket(self):
+        self.ws.connect(self.url, header=self.headers)
+
     def connect(self):
         """Creates the websocket and connects
 
         Returns:
             self (WebSocket)
         """
-        ws_kwargs = {}
-        if not self.verify_ssl:
-            ws_kwargs.update(sslopt=dict(cert_reqs=ssl.CERT_NONE))
-        self.ws = websocket.WebSocket(**ws_kwargs)
-        self.ws.connect(self.url, header=self.headers)
+        self._init_websocket()
+        self._connect_websocket()
         return self
 
     def close(self):
         """Closes the internal websocket instance
         """
-        self._end_watch.set()
-        self.ws.close()
+        if self.ws.connected:
+            self.ws.close()
 
     def watch(self, onmessage=None):
         """Runs a simple function to monitor the websocket
         """
         if not self.ws:
             raise InvalidStateException('websocket is not connected', 500)
-        ws = self.ws
+        if not callable(onmessage):
+            raise InvalidArgumentException('onmessage must be callable.', 500)
 
-        def watch():
-            while True and not self._end_watch.is_set():
-                try:
-                    m = ws.recv()
-                    if m is not None and callable(onmessage):
-                        onmessage(m)
-                except:
-                    if not self._end_watch.is_set():
-                        raise
-
-        greenlets = [
-            gevent.spawn(watch)
-        ]
-        gevent.joinall(greenlets)
+        for m in self.ws:
+            try:
+                if m is not None:
+                    onmessage(m)
+            except KeyboardInterrupt:
+                self.log.info('Ctrl-C detected. Stopping...')
+                self.close()
+                break
+            except WebSocketConnectionClosedException:
+                self.log.debug('websocket connection closed.')
+                break
+            except:
+                self.log.error(traceback.format_exc())
 
 
 class Response(object):
@@ -561,7 +582,7 @@ class Response(object):
                 self._response_parsed = {}
         except ValueError as e:
             if response.status_code not in self.success_codes:
-                print(e)
+                _get_logger().debug(e)
 
     def raise_error(self):
         """Shortcut to raise an exception using the response text
@@ -659,6 +680,12 @@ class APIException(Exception):
 
 class InvalidStateException(APIException):
     """Indicates that the library object is in an invalid state
+    """
+    pass
+
+
+class InvalidArgumentException(APIException):
+    """Indicates that an invalid argument was given
     """
     pass
 

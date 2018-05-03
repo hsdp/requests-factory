@@ -1,10 +1,23 @@
+import six
 import json
-import responses
 import requests
+import responses
+import requests_factory
+import websocket
 from unittest import TestCase
+from websocket import WebSocketConnectionClosedException
 from requests_factory import MIME_JSON, MIME_FORM
-from requests_factory import RequestMixin, Request, Response, RequestFactory
+from requests_factory import (
+        RequestMixin, Request, Response, RequestFactory, WebSocket)
 from requests_factory import ResponseException
+
+if six.PY3:
+    from unittest import mock
+else:
+    import mock
+
+
+test_data = None
 
 
 class CustomRequest(Request):
@@ -59,7 +72,8 @@ class TestRequestMixin(TestCase):
         req = self.req.set_basic_auth('abc', '123')
         self.assertIsInstance(req, RequestMixin)
         self.assertIn('authorization', req.headers)
-        self.assertEqual('Basic YWJjOjEyMw==', self.req.headers['authorization'])
+        self.assertEqual('Basic YWJjOjEyMw==',
+                         self.req.headers['authorization'])
 
     def test_set_bearer_auth(self):
         req = self.req.set_bearer_auth('value')
@@ -118,8 +132,10 @@ class TestRequestFactory(TestCase):
     def test_request(self):
         req = self.fact.request('foo', 'bar')
         self.assertIsInstance(req, Request)
-        self.assertEqual('http://localhost/foo/bar/abc/def', req.get_url('abc/def'))
-        self.assertEqual('http://localhost/foo/bar/abc/123', req.get_url('abc/123'))
+        self.assertEqual('http://localhost/foo/bar/abc/def',
+                         req.get_url('abc/def'))
+        self.assertEqual('http://localhost/foo/bar/abc/123',
+                         req.get_url('abc/123'))
 
     def test_set_request_class(self):
         fact = self.fact.set_request_class(CustomRequest)
@@ -127,6 +143,7 @@ class TestRequestFactory(TestCase):
         self.assertEqual(fact.request_class, CustomRequest)
         req = fact.request('abc')
         self.assertIsInstance(req, CustomRequest)
+
 
 class TestRequest(TestCase):
 
@@ -149,9 +166,11 @@ class TestRequest(TestCase):
         self.assertTupleEqual(expected_callback, self.req.callback)
         self.assertEqual('http://localhost/abc', self.req.base_url)
         self.assertEqual(self.req.verify_ssl, False)
-        self.assertEqual(self.req.headers['authorization'], 'Basic YWJjOjEyMw==')
+        self.assertEqual(self.req.headers['authorization'],
+                         'Basic YWJjOjEyMw==')
         self.assertEqual(self.req.response_class, self.fact.response_class)
-        self.assertDictEqual(self.req.custom_requests_args, {'allow_redirects': False})
+        self.assertDictEqual(self.req.custom_requests_args,
+                             {'allow_redirects': False})
 
     def test_set_method(self):
         req = self.req.set_method('GET')
@@ -188,7 +207,8 @@ class TestRequest(TestCase):
     def test_add_file(self):
         fh = object()
         self.req.add_file('abc', 'abc.txt', fh, 'text/plain')
-        self.assertTupleEqual(self.req.multipart_files['abc'], ('abc.txt', fh, 'text/plain'))
+        self.assertTupleEqual(
+            self.req.multipart_files['abc'], ('abc.txt', fh, 'text/plain'))
 
     def test_get_requests_args(self):
         func, url, kwargs = self.req.get_requests_args()
@@ -245,16 +265,18 @@ class TestResponse(TestCase):
 
     def test_headers(self):
         ex = {'x-abc': '123'}
-        res = self.get_response(200, headers=ex)
+        res = self.get_response(200, headers=ex).headers
         for n, v in ex.items():
-            self.assertIn(n, ex)
-            self.assertEqual(ex[n], v)
+            self.assertIn(n, res)
+            self.assertEqual(res[n], v)
 
     def test_data(self):
         ex = json.dumps({'foo': 'bar'})
-        res = self.get_response(200, headers={'content-type': MIME_JSON}, body=ex)
+        res = self.get_response(
+            200, headers={'content-type': MIME_JSON}, body=ex)
         self.assertDictEqual(res.data, json.loads(ex))
-        res = self.get_response(400, headers={'content-type': MIME_JSON}, body='')
+        res = self.get_response(
+            400, headers={'content-type': MIME_JSON}, body='')
         with self.assertRaises(ResponseException):
             res.data
 
@@ -268,6 +290,51 @@ class TestResponse(TestCase):
 
     def test_raw_data(self):
         ex = json.dumps({'foo': 'bar'})
-        res = self.get_response(400, headers={'content-type': MIME_JSON}, body=ex)
+        res = self.get_response(
+            400, headers={'content-type': MIME_JSON}, body=ex)
         self.assertDictEqual(res.raw_data, json.loads(ex))
 
+
+class TestWebSocket(TestCase):
+    def test_init(self):
+        WebSocket('ws://localhost/stream')
+
+    def test_log(self):
+        ws = WebSocket('ws://localhost/stream')
+        ws.log.info('abc123')
+        self.assertEqual(ws.log.name, requests_factory.__name__)
+
+    def test_custom_log(self):
+        ws = WebSocket('ws://localhost/stream', logger='custom')
+        ws.log.info('abc123')
+        self.assertEqual(ws.log.name, 'custom')
+
+    def test_connect(self):
+        with mock.patch.object(requests_factory.websocket.WebSocket, 'connect',
+                               return_value=None) as connect:
+            ws = WebSocket('ws://localhost/stream', verify_ssl=True)
+            ws.connect()
+            connect.assert_called_once_with(ws.url, header=ws.headers)
+
+    def test_watch(self):
+        with mock.patch.object(
+                websocket.WebSocket,
+                'connect',
+                return_value=None
+        ) as connect, mock.patch.object(
+                websocket.WebSocket,
+                'recv',
+                return_value='abc123'
+        ) as recv:
+            ws = WebSocket('ws://localhost/stream', verify_ssl=True)
+            ws.connect()
+            connect.assert_called_once_with(ws.url, header=ws.headers)
+
+            def onmessage(m):
+                global test_data
+                test_data = m
+                raise WebSocketConnectionClosedException()
+
+            ws.watch(onmessage)
+            recv.assert_called_once()
+            self.assertEqual(test_data, 'abc123')
