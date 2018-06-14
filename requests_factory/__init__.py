@@ -577,7 +577,8 @@ class Response(object):
         self._response_parsed = None
         try:
             if response.content:
-                self._response_parsed = json.loads(response.content)
+                content = response.content.decode('utf-8')
+                self._response_parsed = json.loads(content)
             else:
                 self._response_parsed = {}
         except ValueError as e:
