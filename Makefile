@@ -1,24 +1,26 @@
+SHELL := /bin/bash
+VENV := python3 -m venv
+ENVDIR := env3
+ACTIVATE := $(ENVDIR)/bin/activate
+
 .PHONY: test deps deps-dev clean deploy
 
 clean:
-	rm -r env || :
-	rm -r env3 || :
+	rm -r $(ENVDIR) || :
 
 deps:
-	[[ ! -f env/bin/activate ]] && virtualenv env || :
-	[[ ! -f env3/bin/activate ]] && virtualenv -p python3 env3 || :
-	. env/bin/activate && pip install -r requirements.txt ; deactivate
-	. env3/bin/activate && pip install -r requirements.txt ; deactivate
+	[[ ! -f $(ACTIVATE) ]] && { \
+		$(VENV) $(ENVDIR) && \
+		sed -i 's/include-system-site-packages = false/include-system-site-packages = true/g' env3/pyvenv.cfg ; } || :
+	. $(ACTIVATE) && pip3 install -r requirements.txt && pip3 install twine ; deactivate
 
 deps-dev:
-	[[ ! -f env/bin/activate ]] && virtualenv env || :
-	[[ ! -f env3/bin/activate ]] && virtualenv -p python3 env3 || :
-	. env/bin/activate && pip install -r requirements-dev.txt ; deactivate
-	. env3/bin/activate && pip install -r requirements-dev.txt ; deactivate
+	[[ ! -f $(ACTIVATE) ]] && $(VENV) $(ENVDIR) || :
+	. $(ACTIVATE) && pip3 install -r requirements-dev.txt ; deactivate
 
 test: deps deps-dev
-	. env/bin/activate && nose2 -v ; deactivate
-	. env3/bin/activate && nose2 -v ; deactivate
+	. $(ACTIVATE) && nose2 -v ; deactivate
 
 deploy: clean test
-	python setup.py sdist upload --repository=https://upload.pypi.org/legacy/
+	. $(ACTIVATE) && twine upload dist/*
+	#python setup.py sdist upload --show-response -v --repository=https://upload.pypi.org/legacy/

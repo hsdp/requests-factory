@@ -1,4 +1,4 @@
 six
 requests>=2.5.0,<3.0.0
-requests-toolbelt>=0.3.0,<1.0.0
-websocket-client>=0.40.0,<1.0.0
+requests-toolbelt>=0.3.0
+websocket-client>=0.40.0
